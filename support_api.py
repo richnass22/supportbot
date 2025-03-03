@@ -150,4 +150,4 @@ if __name__ == '__main__':
     telegram_thread = Thread(target=start_telegram_bot)
     telegram_thread.start()
 
-    app.run(port=5000, host="0.0.0.0", debug=True)
+    app.run(port=8080, host="0.0.0.0", debug=True)
