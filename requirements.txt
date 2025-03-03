@@ -3,3 +3,4 @@ requests
 msal
 openai
 python-telegram-bot
+python-dotenv 
