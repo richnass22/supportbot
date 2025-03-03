@@ -1,1 +1,5 @@
-flask requests msal openai python-telegram-bot 
+flask
+requests
+msal
+openai
+python-telegram-bot
