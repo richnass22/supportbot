@@ -1,18 +1,23 @@
-from flask import Flask, request, jsonify
-import requests
-import smtplib
-import json
-import openai
 import os
-from email.mime.text import MIMEText
+import requests
+import openai
+from flask import Flask, jsonify
 from msal import ConfidentialClientApplication
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram import Bot
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Configuration
+# Debugging: Print environment variables
+print("🔹 CLIENT_ID:", os.getenv("CLIENT_ID"))
+print("🔹 TENANT_ID:", os.getenv("TENANT_ID"))
+
+if not os.getenv("CLIENT_SECRET"):
+    print("❌ ERROR: CLIENT_SECRET is missing!")
+    exit()
+
+# Environment Variables
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 TENANT_ID = os.getenv("TENANT_ID")
@@ -21,133 +26,84 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+# Initialize Flask App
 app = Flask(__name__)
 
-# Set up OpenAI API
+# Initialize OpenAI API
 openai.api_key = OPENAI_API_KEY
 
-# Microsoft Graph API Authentication
+# Initialize Telegram Bot
+telegram_bot = Bot(token=TELEGRAM_BOT_TOKEN)
+
 def get_access_token():
-    app = ConfidentialClientApplication(CLIENT_ID, authority=f"https://login.microsoftonline.com/{TENANT_ID}",
-                                        client_credential=CLIENT_SECRET)
-    token = app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
-    return token.get("access_token")
+    """ Authenticate with Microsoft and get an access token """
+    app = ConfidentialClientApplication(
+        CLIENT_ID,
+        authority=f"https://login.microsoftonline.com/{TENANT_ID}",
+        client_credential=CLIENT_SECRET
+    )
 
-# Fetch unread emails
-def fetch_unread_emails():
-    access_token = get_access_token()
-    headers = {"Authorization": f"Bearer {access_token}"}
-    url = f"https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$filter=isRead eq false"
-
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        emails = response.json().get("value", [])
-        return emails
+    token_response = app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
+    
+    if "access_token" in token_response:
+        print("✅ Authentication successful!")
+        return token_response["access_token"]
     else:
+        print("❌ Authentication failed:", token_response)
+        return None
+
+def fetch_unread_emails():
+    """ Fetch unread emails from Outlook """
+    access_token = get_access_token()
+    if not access_token:
         return []
 
-# Generate AI Response
-def generate_ai_response(user_query):
-    prompt = f"Client Issue: {user_query}\nProvide a professional and helpful support response."
-    
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "system", "content": prompt}]
-    )
+    url = "https://graph.microsoft.com/v1.0/me/messages?$filter=isRead eq false"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    response = requests.get(url, headers=headers)
 
-    return response['choices'][0]['message']['content']
+    if response.status_code == 200:
+        return response.json().get("value", [])
+    else:
+        print("❌ Failed to fetch emails:", response.json())
+        return []
 
-# Send email response
-def send_email(to_email, subject, body):
-    smtp_server = "smtp.office365.com"
-    smtp_port = 587
-    smtp_user = EMAIL_ADDRESS
-    smtp_password = "your-app-password"
+def generate_response(prompt):
+    """ Use OpenAI to generate a response """
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response["choices"][0]["message"]["content"]
+    except Exception as e:
+        print("❌ OpenAI Error:", e)
+        return "I'm sorry, I couldn't process your request."
 
-    msg = MIMEText(body)
-    msg["Subject"] = subject
-    msg["From"] = smtp_user
-    msg["To"] = to_email
+def send_telegram_message(message):
+    """ Send a message via Telegram bot """
+    telegram_bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
 
-    with smtplib.SMTP(smtp_server, smtp_port) as server:
-        server.starttls()
-        server.login(smtp_user, smtp_password)
-        server.sendmail(smtp_user, to_email, msg.as_string())
-
-# Telegram Bot Handlers
-async def start(update, context):
-    await update.message.reply_text("Hello! I will notify you when a new support email arrives.")
-
-async def handle_message(update, context):
-    text = update.message.text
-    chat_id = update.message.chat_id
-    
-    if text.startswith("APPROVE:"):
-        data = text.replace("APPROVE:", "").strip().split("|")
-        to_email, subject, body = data
-        send_email(to_email, subject, body)
-        await update.message.reply_text("✅ Email sent successfully.")
-    
-    elif text.startswith("EDIT:"):
-        data = text.replace("EDIT:", "").strip().split("|")
-        to_email, subject, new_body = data
-        send_email(to_email, subject, new_body)
-        await update.message.reply_text("✅ Edited response sent successfully.")
-
-def send_telegram_notification(email_data, ai_response):
-    sender = email_data["from"]["emailAddress"]["address"]
-    subject = email_data["subject"]
-    message_body = email_data["body"]["content"]
-
-    message = (
-        f"📩 New Support Request\n"
-        f"👤 From: {sender}\n"
-        f"📝 Subject: {subject}\n"
-        f"📖 Message: {message_body}\n\n"
-        f"🤖 AI Suggested Response:\n"
-        f"{ai_response}\n\n"
-        f"Reply with:\n"
-        f"✅ APPROVE:{sender}|{subject}|{ai_response}\n"
-        f"✏️ EDIT:{sender}|{subject}|[Your Edited Response]"
-    )
-
-    requests.post(
-        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-        json={"chat_id": TELEGRAM_CHAT_ID, "text": message}
-    )
-
-# Process emails and send notifications
 @app.route('/process-emails', methods=['GET'])
 def process_emails():
+    """ Process unread emails and send replies """
     emails = fetch_unread_emails()
     if not emails:
-        return jsonify({"message": "No unread emails."})
+        return jsonify({"message": "No new unread emails"}), 200
 
     for email in emails:
-        sender = email["from"]["emailAddress"]["address"]
-        subject = email["subject"]
-        body = email["body"]["content"]
+        subject = email.get("subject", "No Subject")
+        body = email.get("bodyPreview", "No Content")
 
-        ai_response = generate_ai_response(body)
+        response = generate_response(f"Subject: {subject}\n\n{body}")
 
-        send_telegram_notification(email, ai_response)
+        send_telegram_message(f"📩 **New Email**\n🔹 **Subject:** {subject}\n💬 **Response:** {response}")
 
-    return jsonify({"message": "Telegram notifications sent for approval."})
+    return jsonify({"message": "Processed emails"}), 200
 
-# Start Telegram Bot
-def start_telegram_bot():
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+@app.route('/')
+def home():
+    return "✅ Support Bot is Running!", 200
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    application.run_polling()
-
-# Run the Flask API
 if __name__ == '__main__':
-    from threading import Thread
-
-    telegram_thread = Thread(target=start_telegram_bot)
-    telegram_thread.start()
-
-    app.run(port=8080, host="0.0.0.0", debug=True)
+    app.run(host="0.0.0.0", port=5000)
