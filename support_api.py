@@ -6,8 +6,7 @@ import openai
 import os
 from email.mime.text import MIMEText
 from msal import ConfidentialClientApplication
-from telegram import Bot
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -26,9 +25,6 @@ app = Flask(__name__)
 
 # Set up OpenAI API
 openai.api_key = OPENAI_API_KEY
-
-# Set up Telegram Bot
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 # Microsoft Graph API Authentication
 def get_access_token():
@@ -79,10 +75,10 @@ def send_email(to_email, subject, body):
         server.sendmail(smtp_user, to_email, msg.as_string())
 
 # Telegram Bot Handlers
-def start(update, context):
-    update.message.reply_text("Hello! I will notify you when a new support email arrives.")
+async def start(update, context):
+    await update.message.reply_text("Hello! I will notify you when a new support email arrives.")
 
-def handle_message(update, context):
+async def handle_message(update, context):
     text = update.message.text
     chat_id = update.message.chat_id
     
@@ -90,13 +86,13 @@ def handle_message(update, context):
         data = text.replace("APPROVE:", "").strip().split("|")
         to_email, subject, body = data
         send_email(to_email, subject, body)
-        update.message.reply_text("✅ Email sent successfully.")
+        await update.message.reply_text("✅ Email sent successfully.")
     
     elif text.startswith("EDIT:"):
         data = text.replace("EDIT:", "").strip().split("|")
         to_email, subject, new_body = data
         send_email(to_email, subject, new_body)
-        update.message.reply_text("✅ Edited response sent successfully.")
+        await update.message.reply_text("✅ Edited response sent successfully.")
 
 def send_telegram_notification(email_data, ai_response):
     sender = email_data["from"]["emailAddress"]["address"]
@@ -115,7 +111,10 @@ def send_telegram_notification(email_data, ai_response):
         f"✏️ EDIT:{sender}|{subject}|[Your Edited Response]"
     )
 
-    bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+    requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+        json={"chat_id": TELEGRAM_CHAT_ID, "text": message}
+    )
 
 # Process emails and send notifications
 @app.route('/process-emails', methods=['GET'])
@@ -137,14 +136,12 @@ def process_emails():
 
 # Start Telegram Bot
 def start_telegram_bot():
-    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
-    dp = updater.dispatcher
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    updater.start_polling()
-    updater.idle()
+    application.run_polling()
 
 # Run the Flask API
 if __name__ == '__main__':
@@ -153,4 +150,4 @@ if __name__ == '__main__':
     telegram_thread = Thread(target=start_telegram_bot)
     telegram_thread.start()
 
-    app.run(port=5000, debug=True)
+    app.run(port=5000, host="0.0.0.0", debug=True)
