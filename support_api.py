@@ -87,21 +87,14 @@ def fetch_unread_emails(access_token, hours=None):
         print(f"❌ Error fetching unread emails: {response.json()}")
         return None
 
-# 🔹 Escape Special Characters for Telegram HTML Mode
-def escape_html(text):
-    """Escape special characters for Telegram HTML mode messages."""
-    return html.escape(text)
-
 # 🔹 Send Message to Telegram (Uses HTML Mode for Stability)
 def send_to_telegram(message):
-    """Send a well-formatted message to Telegram with escaped HTML characters."""
+    """Send a well-formatted message to Telegram using HTML mode."""
     telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-
-    escaped_message = escape_html(message)  # Escape special characters
 
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": escaped_message,
+        "text": message,
         "parse_mode": "HTML",
         "disable_web_page_preview": True
     }
@@ -144,9 +137,9 @@ async def send_email_to_telegram(hours=None):
                 # Limit message size for Telegram
                 body_preview = body_text[:500] + "..." if len(body_text) > 500 else body_text
 
-                # Format message for better readability & escape characters
+                # Format message for better readability
                 message = (
-                    f"📩 <b>New Email Received</b> [#{index}]\n"
+                    f"<b>📩 New Email Received</b> [#{index}]\n"
                     f"📌 <b>From:</b> {sender_name} ({sender_email})\n"
                     f"📌 <b>Subject:</b> {subject}\n"
                     f"🕒 <b>Received:</b> {received_time}\n"
@@ -156,7 +149,36 @@ async def send_email_to_telegram(hours=None):
 
                 send_to_telegram(message)
         else:
-            send_to_telegram("📭 <b>No new unread emails found.</b>")
+            send_to_telegram("<b>📭 No new unread emails found.</b>")
+
+# ✅ **Define `/fetch_emails` Command**
+async def fetch_emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Trigger email fetch via Telegram command."""
+    print("📥 Received /fetch_emails command.")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="📬 Fetching latest unread emails...")
+    await send_email_to_telegram()
+
+# ✅ **Define `/suggest_response` Command**
+async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate AI response based on selected email."""
+    args = context.args
+    if not args or len(args) < 2:
+        await update.message.reply_text("⚠️ Specify an email number & message.\nExample: `/suggest_response 2 Apologize for the delay`")
+        return
+
+    email_index = args[0]  
+    user_message = " ".join(args[1:])
+
+    if email_index not in email_store:
+        await update.message.reply_text("⚠️ Invalid email number. Use `/fetch_emails` first.")
+        return
+
+    email_data = email_store[email_index]
+    full_prompt = f"Company: NextTradeWave.com (CFD FX Broker)\n\nEmail Subject: {email_data['subject']}\n\nEmail Body: {email_data['body']}\n\nUser Instruction: {user_message}"
+
+    ai_response = generate_ai_response(full_prompt)
+
+    await update.message.reply_text(f"🤖 <b>AI Suggested Reply:</b>\n{ai_response}", parse_mode="HTML")
 
 # ✅ **Start Telegram Bot Properly**
 def start_telegram_bot():
