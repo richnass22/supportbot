@@ -137,6 +137,51 @@ async def fetch_recent_command(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     hours = int(args[0])
+    await update.message.reply_text(f"📬 Fetching all unread emails from the last {hours} hours...")
+
+    access_token = get_access_token()
+    if not access_token:
+        await update.message.reply_text("❌ Error: Could not retrieve access token.")
+        return
+
+    emails = fetch_unread_emails(access_token, hours)
+    if not emails:
+        await update.message.reply_text("📭 No unread emails found.")
+        return
+
+    for index, email in enumerate(emails, start=1):  # Now processes ALL emails
+        subject = email.get("subject", "No Subject")
+        sender_name = email.get("from", {}).get("emailAddress", {}).get("name", "Unknown Sender")
+        sender_email = email.get("from", {}).get("emailAddress", {}).get("address", "Unknown Email")
+        received_time = email.get("receivedDateTime", "Unknown Time")
+        body_html = email.get("body", {}).get("content", "No Preview Available")
+
+        soup = BeautifulSoup(body_html, "html.parser")
+        body_text = soup.get_text()
+
+        email_store[str(index)] = {
+            "sender": sender_name,
+            "subject": subject,
+            "body": body_text
+        }
+
+        message = (
+            f"<b>📩 New Email Received</b> [#{index}]\n"
+            f"📌 <b>From:</b> {sender_name} ({sender_email})\n"
+            f"📌 <b>Subject:</b> {subject}\n"
+            f"🕒 <b>Received:</b> {received_time}\n"
+            f"📝 <b>Preview:</b> {body_text[:500]}...\n\n"
+            f"✍️ Reply with: <code>/suggest_response {index} Your message</code>"
+        )
+
+        try:
+            await update.message.reply_text(message, parse_mode="HTML", disable_web_page_preview=True)
+        except Exception as e:
+            print(f"❌ Error sending message to Telegram: {e}")
+
+    await update.message.reply_text(f"✅ Displayed all unread emails from the last {hours} hours.")
+
+    hours = int(args[0])
     await update.message.reply_text(f"📬 Fetching emails from the last {hours} hours...")
     await send_email_to_telegram(context, hours)
 
