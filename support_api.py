@@ -159,6 +159,34 @@ async def send_email_to_telegram(hours=None):
         else:
             send_to_telegram("📭 *No new unread emails found.*")
 
+# === 🤖 TELEGRAM BOT COMMANDS === #
+async def fetch_emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Trigger email fetch via Telegram command."""
+    print("📥 Received /fetch_emails command.")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="📬 Fetching latest unread emails...")
+    await send_email_to_telegram()
+
+async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate AI response based on selected email."""
+    args = context.args
+    if not args or len(args) < 2:
+        await update.message.reply_text("⚠️ Specify an email number & message.\nExample: `/suggest_response 2 Apologize for the delay`")
+        return
+
+    email_index = args[0]  
+    user_message = " ".join(args[1:])
+
+    if email_index not in email_store:
+        await update.message.reply_text("⚠️ Invalid email number. Use `/fetch_emails` first.")
+        return
+
+    email_data = email_store[email_index]
+    full_prompt = f"Company: NextTradeWave.com (CFD FX Broker)\n\nEmail Subject: {email_data['subject']}\n\nEmail Body: {email_data['body']}\n\nUser Instruction: {user_message}"
+
+    ai_response = generate_ai_response(full_prompt)
+
+    await update.message.reply_text(f"🤖 *AI Suggested Reply:*\n{ai_response}", parse_mode="MarkdownV2")
+
 # ✅ **Start Telegram Bot Properly**
 def start_telegram_bot():
     telegram_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
