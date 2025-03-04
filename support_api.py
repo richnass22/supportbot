@@ -98,7 +98,7 @@ def send_to_telegram(message):
     """Send a well-formatted message to Telegram with escaped MarkdownV2 characters."""
     telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
-    escaped_message = escape_markdown(message)  # Escape special characters
+    escaped_message = escape_markdown(message)  # Properly escape special characters
 
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
@@ -131,24 +131,24 @@ async def send_email_to_telegram(hours=None):
                 received_time = email.get("receivedDateTime", "Unknown Time")
                 body_html = email.get("body", {}).get("content", "No Preview Available")
 
-                # Convert HTML to plain text to avoid Telegram formatting issues
+                # Convert HTML to plain text
                 soup = BeautifulSoup(body_html, "html.parser")
                 body_text = soup.get_text()
 
-                # Store email data in dictionary for future reference
+                # Store email data
                 email_store[str(index)] = {
                     "sender": sender_name,
                     "subject": subject,
                     "body": body_text
                 }
 
-                # Limit message size for Telegram compatibility
+                # Limit message size for Telegram
                 body_preview = body_text[:500] + "..." if len(body_text) > 500 else body_text
 
-                # Format message for better readability
-                message = (
-                    f"📩 *New Email Received* \\[#{index}\\]\n"
-                    f"📌 *From:* {sender_name} \\({sender_email}\\)\n"
+                # Format message for better readability & escape characters
+                message = escape_markdown(
+                    f"📩 *New Email Received* [#{index}]\n"
+                    f"📌 *From:* {sender_name} ({sender_email})\n"
                     f"📌 *Subject:* {subject}\n"
                     f"🕒 *Received:* {received_time}\n"
                     f"📝 *Preview:* {body_preview}\n\n"
@@ -158,13 +158,6 @@ async def send_email_to_telegram(hours=None):
                 send_to_telegram(message)
         else:
             send_to_telegram("📭 *No new unread emails found.*")
-
-# === 🤖 TELEGRAM BOT COMMANDS === #
-async def fetch_emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger email fetch via Telegram command."""
-    print("📥 Received /fetch_emails command.")
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="📬 Fetching latest unread emails...")
-    await send_email_to_telegram()
 
 async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Generate AI response based on selected email."""
