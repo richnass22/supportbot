@@ -139,7 +139,7 @@ async def send_email_to_telegram():
 @flask_app.route("/process-emails", methods=["GET"])
 def process_emails():
     """Trigger the email fetch function."""
-    asyncio.create_task(send_email_to_telegram())
+    asyncio.run(send_email_to_telegram())  # ✅ Fixed: Ensures an event loop is running
     return jsonify({"message": "Fetching emails... Check your Telegram!"})
 
 # === 🤖 TELEGRAM BOT COMMANDS === #
