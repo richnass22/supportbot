@@ -2,6 +2,7 @@ import os
 import requests
 import asyncio
 import html
+import threading
 from msal import ConfidentialClientApplication
 from flask import Flask, jsonify
 from telegram import Update
@@ -149,15 +150,21 @@ async def fetch_emails_command(update: Update, context: ContextTypes.DEFAULT_TYP
     await send_email_to_telegram()
 
 # 🔹 Setup Telegram Bot
-try:
+def start_telegram_bot():
+    """Runs the Telegram bot in a separate thread"""
     telegram_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     telegram_app.add_handler(CommandHandler("fetch_emails", fetch_emails_command))
-    
-    print("✅ Telegram bot initialized successfully!")
-except Exception as e:
-    raise ValueError(f"❌ Telegram bot initialization failed: {e}")
 
-# 🔹 Run Flask Server
+    print("✅ Telegram bot initialized successfully!")
+    telegram_app.run_polling()
+
+# 🔹 Run Flask Server & Telegram Bot Together
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))  # Default to 8080
+
+    # Start Telegram bot in a separate thread
+    telegram_thread = threading.Thread(target=start_telegram_bot, daemon=True)
+    telegram_thread.start()
+
+    # Start Flask server
     flask_app.run(host="0.0.0.0", port=port)
