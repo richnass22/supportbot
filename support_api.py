@@ -3,6 +3,7 @@ import requests
 import asyncio
 import html
 import threading
+import re
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup  # For stripping HTML from emails
 from msal import ConfidentialClientApplication
@@ -86,7 +87,6 @@ def fetch_unread_emails(access_token, hours=None):
         print(f"❌ Error fetching unread emails: {response.json()}")
         return None
 
-# 🔹 import re
 
 def escape_markdown(text):
     """Escape special characters for MarkdownV2 in Telegram messages."""
