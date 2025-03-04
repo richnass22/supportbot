@@ -129,9 +129,9 @@ def process_emails():
     asyncio.run(send_email_to_telegram())  # ✅ Fixed: Ensures an event loop is running
     return jsonify({"message": "Fetching emails... Check your Telegram!"})
 
-# 🔹 Generate AI Response
+# 🔹 Generate AI Response (With Error Handling)
 def generate_ai_response(prompt):
-    """Calls OpenAI to generate a response."""
+    """Calls OpenAI to generate a response with error handling."""
     url = "https://api.openai.com/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {OPENAI_API_KEY}",
@@ -147,20 +147,17 @@ def generate_ai_response(prompt):
     if response.status_code == 200:
         return response.json()["choices"][0]["message"]["content"]
     else:
-        return f"⚠️ Error generating AI response: {response.text}"
+        error_message = response.json().get("error", {}).get("message", "Unknown error occurred.")
+        return f"⚠️ AI Response Unavailable: {error_message}\nPlease check OpenAI API status or billing."
 
 # === 🤖 TELEGRAM BOT COMMANDS === #
 async def fetch_emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Trigger email fetch via Telegram command."""
-    print(f"📥 Received /fetch_emails from: {update.message.chat_id}")
     await context.bot.send_message(chat_id=update.effective_chat.id, text="📬 Fetching emails...")
     await send_email_to_telegram()
 
 async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Generate AI response based on selected email."""
-    print(f"📥 Received /suggest_response from: {update.message.chat_id}")
-    print(f"📥 Command Arguments: {context.args}")
-
     args = context.args
     if not args or len(args) < 2:
         await update.message.reply_text("⚠️ Please specify an email number and message.\nExample: `/suggest_response 2 Please be polite`")
