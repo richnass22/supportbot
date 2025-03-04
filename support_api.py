@@ -151,6 +151,29 @@ async def send_email_to_telegram(hours=None):
         else:
             send_to_telegram("<b>📭 No new unread emails found.</b>")
 
+# ✅ **Define AI Response Function**
+def generate_ai_response(prompt):
+    """Calls OpenAI to generate a response with error handling."""
+    url = "https://api.openai.com/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "gpt-3.5-turbo",
+        "messages": [
+            {"role": "system", "content": "You are a customer support assistant for NextTradeWave.com, a CFD FX broker."},
+            {"role": "user", "content": prompt}
+        ]
+    }
+    response = requests.post(url, headers=headers, json=data)
+
+    if response.status_code == 200:
+        return response.json()["choices"][0]["message"]["content"]
+    else:
+        error_msg = response.json().get("error", {}).get("message", "Unknown error")
+        return f"⚠️ AI Response Unavailable: {error_msg}\nPlease check OpenAI API status or billing."
+
 # ✅ **Define `/fetch_emails` Command**
 async def fetch_emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Trigger email fetch via Telegram command."""
@@ -169,25 +192,13 @@ async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     email_index = args[0]  
     user_message = " ".join(args[1:])
 
-    if email_index not in email_store:
+    email_data = email_store.get(email_index)
+    if not email_data:
         await update.message.reply_text("⚠️ Invalid email number. Use `/fetch_emails` first.")
         return
 
-    email_data = email_store[email_index]
-    full_prompt = f"Company: NextTradeWave.com (CFD FX Broker)\n\nEmail Subject: {email_data['subject']}\n\nEmail Body: {email_data['body']}\n\nUser Instruction: {user_message}"
+    full_prompt = f"Company: NextTradeWave.com\n\nEmail Subject: {email_data['subject']}\n\nEmail Body: {email_data['body']}\n\nUser Instruction: {user_message}"
 
     ai_response = generate_ai_response(full_prompt)
 
     await update.message.reply_text(f"🤖 <b>AI Suggested Reply:</b>\n{ai_response}", parse_mode="HTML")
-
-# ✅ **Start Telegram Bot Properly**
-def start_telegram_bot():
-    telegram_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-    telegram_app.add_handler(CommandHandler("fetch_emails", fetch_emails_command))
-    telegram_app.add_handler(CommandHandler("suggest_response", suggest_response))
-    telegram_app.run_polling()
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    start_telegram_bot()
-    flask_app.run(host="0.0.0.0", port=port)
