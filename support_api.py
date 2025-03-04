@@ -12,7 +12,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 TENANT_ID = os.getenv("TENANT_ID")
-EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")  # Ensure this is set correctly!
+EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -129,20 +129,63 @@ def process_emails():
     asyncio.run(send_email_to_telegram())  # ✅ Fixed: Ensures an event loop is running
     return jsonify({"message": "Fetching emails... Check your Telegram!"})
 
+# 🔹 Generate AI Response
+def generate_ai_response(prompt):
+    """Calls OpenAI to generate a response."""
+    url = "https://api.openai.com/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "gpt-3.5-turbo",
+        "messages": [{"role": "system", "content": "You are a professional customer support assistant."},
+                     {"role": "user", "content": prompt}]
+    }
+    response = requests.post(url, headers=headers, json=data)
+
+    if response.status_code == 200:
+        return response.json()["choices"][0]["message"]["content"]
+    else:
+        return f"⚠️ Error generating AI response: {response.text}"
+
 # === 🤖 TELEGRAM BOT COMMANDS === #
 async def fetch_emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Trigger email fetch via Telegram command."""
+    print(f"📥 Received /fetch_emails from: {update.message.chat_id}")
     await context.bot.send_message(chat_id=update.effective_chat.id, text="📬 Fetching emails...")
     await send_email_to_telegram()
 
-# ✅ **Fixed Telegram Polling - Runs in Main Thread**
+async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate AI response based on selected email."""
+    print(f"📥 Received /suggest_response from: {update.message.chat_id}")
+    print(f"📥 Command Arguments: {context.args}")
+
+    args = context.args
+    if not args or len(args) < 2:
+        await update.message.reply_text("⚠️ Please specify an email number and message.\nExample: `/suggest_response 2 Please be polite`")
+        return
+
+    email_index = args[0]  # First argument should be the email number
+    user_message = " ".join(args[1:])  # The rest is the message
+
+    if email_index not in email_store:
+        await update.message.reply_text("⚠️ Invalid email number. Use `/fetch_emails` to get valid email IDs.")
+        return
+
+    email_data = email_store[email_index]
+    full_prompt = f"Email Subject: {email_data['subject']}\n\nEmail Body: {email_data['body']}\n\nUser Instruction: {user_message}"
+
+    ai_response = generate_ai_response(full_prompt)
+
+    await update.message.reply_text(f"🤖 *AI Suggested Reply:*\n{ai_response}", parse_mode="Markdown")
+
+# ✅ **Start Telegram Bot Properly**
 def start_telegram_bot():
     """Runs the Telegram bot properly in the main thread"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
     telegram_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     telegram_app.add_handler(CommandHandler("fetch_emails", fetch_emails_command))
+    telegram_app.add_handler(CommandHandler("suggest_response", suggest_response))
 
     print("✅ Telegram bot initialized successfully!")
     telegram_app.run_polling()
@@ -150,9 +193,5 @@ def start_telegram_bot():
 # 🔹 Run Flask Server & Telegram Bot Together
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-
-    # Start Telegram bot properly without threading issues
-    start_telegram_bot()
-
-    # Start Flask server
-    flask_app.run(host="0.0.0.0", port=port)
+    start_telegram_bot()  # Start Telegram bot
+    flask_app.run(host="0.0.0.0", port=port)  # Start Flask server
