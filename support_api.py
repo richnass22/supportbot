@@ -9,6 +9,7 @@ from msal import ConfidentialClientApplication
 from flask import Flask, jsonify
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 
 # 🔹 Load environment variables
 CLIENT_ID = os.getenv("CLIENT_ID")
@@ -75,39 +76,61 @@ def send_to_telegram(message):
 
 # 🔹 Async Function for Email Processing
 async def send_email_to_telegram():
-    """Fetch unread emails and send them to Telegram."""
+    """Fetch unread emails, clean the content, and send them to Telegram with buttons."""
+    print("📥 Fetching emails...")
     access_token = get_access_token()
-    if not access_token:
-        send_to_telegram("❌ Could not retrieve access token.")
-        return
+    
+    if access_token:
+        emails = fetch_unread_emails(access_token)
+        
+        if emails:
+            print(f"✅ {len(emails)} unread emails found.")
+            email_store.clear()  # Reset previous emails
+            
+            for index, email in enumerate(emails[:5], start=1):  # Process top 5 emails
+                subject = email.get("subject", "No Subject")
+                sender_name = email.get("from", {}).get("emailAddress", {}).get("name", "Unknown Sender")
+                sender_email = email.get("from", {}).get("emailAddress", {}).get("address", "Unknown Email")
+                received_time = email.get("receivedDateTime", "Unknown Time")
+                body_html = email.get("body", {}).get("content", "No Preview Available")
 
-    emails = fetch_unread_emails(access_token)
-    if not emails:
-        send_to_telegram("📭 No new unread emails found.")
-        return
+                # Convert HTML to plain text
+                soup = BeautifulSoup(body_html, "html.parser")
+                body_text = soup.get_text()
 
-    email_store.clear()
-    for index, email in enumerate(emails[:10], start=1):  # Shows up to 10 emails
-        subject = email.get("subject", "No Subject")
-        sender_name = email.get("from", {}).get("emailAddress", {}).get("name", "Unknown Sender")
-        sender_email = email.get("from", {}).get("emailAddress", {}).get("address", "Unknown Email")
-        received_time = email.get("receivedDateTime", "Unknown Time")
-        body_html = email.get("body", {}).get("content", "No Preview Available")
+                # Store email data
+                email_store[str(index)] = {
+                    "sender": sender_name,
+                    "subject": subject,
+                    "body": body_text
+                }
 
-        soup = BeautifulSoup(body_html, "html.parser")
-        body_text = soup.get_text()
+                # Format message for better readability
+                message = (
+                    f"<b>📩 New Email Received</b> [#{index}]\n"
+                    f"📌 <b>From:</b> {sender_name} ({sender_email})\n"
+                    f"📌 <b>Subject:</b> {subject}\n"
+                    f"🕒 <b>Received:</b> {received_time}\n"
+                    f"📝 <b>Preview:</b> {body_text[:500]}...\n\n"
+                    f"✍️ Reply using the button below:"
+                )
 
-        email_store[str(index)] = {"sender": sender_name, "subject": subject, "body": body_text}
+                # Create a button to copy the /suggest_response command
+                button_text = f"✍️ Suggest Reply for Email #{index}"
+                command_text = f"/suggest_response {index} "
+                keyboard = [[InlineKeyboardButton(button_text, switch_inline_query=command_text)]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
 
-        message = (
-            f"<b>📩 New Email Received</b> [#{index}]\n"
-            f"📌 <b>From:</b> {sender_name} ({sender_email})\n"
-            f"📌 <b>Subject:</b> {subject}\n"
-            f"🕒 <b>Received:</b> {received_time}\n"
-            f"📝 <b>Preview:</b> {body_text[:500]}...\n\n"
-            f"✍️ Reply with: <code>/suggest_response {index} Your message</code>"
-        )
-        send_to_telegram(message)
+                print(f"📤 Sending email {index} to Telegram: {subject}")  # Debug Log
+                await context.bot.send_message(
+                    chat_id=TELEGRAM_CHAT_ID,
+                    text=message,
+                    parse_mode="HTML",
+                    reply_markup=reply_markup
+                )
+        else:
+            print("📭 No unread emails found.")  # Debug Log
+            await context.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text="<b>📭 No new unread emails found.</b>", parse_mode="HTML")
 
 # ✅ **Generate AI Response**
 def generate_ai_response(prompt):
