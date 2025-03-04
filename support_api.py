@@ -22,7 +22,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 TOKEN_URL = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
 EMAILS_URL = f"https://graph.microsoft.com/v1.0/users/{EMAIL_ADDRESS}/messages"
 
-# 🔹 Temporary Storage for Emails & User Edits
+# 🔹 Temporary Storage for Emails
 email_store = {}
 
 # 🔹 Flask App Setup
@@ -130,7 +130,7 @@ async def send_email_to_telegram(hours=None):
 
                 # Format message for better readability
                 message = (
-                    f"📩 *New Email Received* \\[# {index} \\]\n"
+                    f"📩 *New Email Received* \\[#{index}\\]\n"
                     f"📌 *From:* {sender_name} \\({sender_email}\\)\n"
                     f"📌 *Subject:* {subject}\n"
                     f"🕒 *Received:* {received_time}\n"
@@ -165,6 +165,12 @@ def generate_ai_response(prompt):
         return f"⚠️ AI Response Unavailable: {response.json().get('error', {}).get('message', 'Unknown error occurred.')}\nPlease check OpenAI API status or billing."
 
 # === 🤖 TELEGRAM BOT COMMANDS === #
+async def fetch_emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Trigger email fetch via Telegram command."""
+    print("📥 Received /fetch_emails command.")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="📬 Fetching latest unread emails...")
+    await send_email_to_telegram()
+
 async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Generate AI response based on selected email."""
     args = context.args
@@ -186,9 +192,9 @@ async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"🤖 *AI Suggested Reply:*\n{ai_response}", parse_mode="MarkdownV2")
 
-# ✅ **Start Telegram Bot Properly**
 def start_telegram_bot():
     telegram_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    telegram_app.add_handler(CommandHandler("fetch_emails", fetch_emails_command))
     telegram_app.add_handler(CommandHandler("suggest_response", suggest_response))
     telegram_app.run_polling()
 
