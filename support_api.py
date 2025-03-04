@@ -3,7 +3,6 @@ import requests
 import asyncio
 import re
 import html
-import threading
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from msal import ConfidentialClientApplication
@@ -44,19 +43,13 @@ def get_access_token():
         "scope": "https://graph.microsoft.com/.default",
         "grant_type": "client_credentials"
     }
-
     response = requests.post(TOKEN_URL, data=data)
-
-    if response.status_code == 200:
-        return response.json().get("access_token")
-    else:
-        return None
+    return response.json().get("access_token") if response.status_code == 200 else None
 
 # 🔹 Fetch Unread Emails (With Time Filter)
 def fetch_unread_emails(access_token, hours=None):
     """Fetch unread emails from Microsoft Graph API, filtering out sent emails and limiting time range."""
     headers = {"Authorization": f"Bearer {access_token}"}
-    
     query = "isRead eq false"
     if hours:
         time_filter = (datetime.utcnow() - timedelta(hours=int(hours))).isoformat() + "Z"
@@ -66,26 +59,21 @@ def fetch_unread_emails(access_token, hours=None):
         f"{EMAILS_URL}?$filter={query}&$orderby=receivedDateTime desc",
         headers=headers
     )
-
     if response.status_code == 200:
         emails = response.json().get("value", [])
-        filtered_emails = [email for email in emails if email.get("from", {}).get("emailAddress", {}).get("address") != EMAIL_ADDRESS]
-        return filtered_emails
-    else:
-        return None
+        return [email for email in emails if email.get("from", {}).get("emailAddress", {}).get("address") != EMAIL_ADDRESS]
+    return None
 
 # 🔹 Send Messages to Telegram (Using HTML Mode)
 def send_to_telegram(message):
     """Send a well-formatted message to Telegram using HTML mode."""
     telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": html.escape(message),
         "parse_mode": "HTML",
         "disable_web_page_preview": True
     }
-
     response = requests.post(telegram_url, json=payload)
     return response.status_code == 200
 
@@ -135,32 +123,13 @@ def generate_ai_response(prompt):
         "messages": [{"role": "system", "content": "You are a customer support assistant for NextTradeWave.com, a CFD FX broker."}, {"role": "user", "content": prompt}]
     }
     response = requests.post(url, headers=headers, json=data)
+    return html.escape(response.json()["choices"][0]["message"]["content"]) if response.status_code == 200 else "⚠️ AI Response Unavailable."
 
-    if response.status_code == 200:
-        return html.escape(response.json()["choices"][0]["message"]["content"])
-    else:
-        return "⚠️ AI Response Unavailable."
-
-# ✅ **Refine AI Response**
-async def refine_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Improve an AI response based on user feedback."""
-    args = context.args
-    if not args or len(args) < 2:
-        await update.message.reply_text("⚠️ Specify response number & improvement.\nExample: `/refine_response 2 Make it more polite.`")
-        return
-
-    response_index = args[0]
-    user_feedback = " ".join(args[1:])
-
-    if response_index not in ai_responses:
-        await update.message.reply_text("⚠️ Invalid response number.")
-        return
-
-    full_prompt = f"Refine this response: {ai_responses[response_index]}\nUser Feedback: {user_feedback}"
-    improved_response = generate_ai_response(full_prompt)
-    ai_responses[response_index] = improved_response
-
-    await update.message.reply_text(f"🤖 <b>Improved AI Response:</b>\n{improved_response}", parse_mode="HTML")
+# ✅ **Fix `/fetch_emails` Command (Pass `update` & `context`)**
+async def fetch_emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Trigger email fetch via Telegram command."""
+    await update.message.reply_text("📬 Fetching latest unread emails...")
+    await send_email_to_telegram()
 
 # ✅ **Help Command**
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -183,8 +152,11 @@ async def auto_fetch_emails():
 
 if __name__ == "__main__":
     telegram_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-    telegram_app.add_handler(CommandHandler("fetch_emails", send_email_to_telegram))
+    telegram_app.add_handler(CommandHandler("fetch_emails", fetch_emails_command))
     telegram_app.add_handler(CommandHandler("help", help_command))
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(auto_fetch_emails())  # Run auto-fetch in background
+
     telegram_app.run_polling()
-    asyncio.run(auto_fetch_emails())
     flask_app.run(host="0.0.0.0", port=8080)
