@@ -193,5 +193,35 @@ async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"🤖 <b>AI Suggested Reply:</b>\n{ai_response}", parse_mode="HTML")
 
+async def fetch_emails(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Trigger email fetch via Telegram command."""
+    print("📥 Received /fetch_emails command.")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="📬 Fetching latest unread emails...")
+
+    try:
+        access_token = get_access_token()
+        
+        if not access_token:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ Error: Could not retrieve access token.")
+            return
+        
+        emails = fetch_unread_emails(access_token)
+
+        if emails:
+            print(f"✅ {len(emails)} unread emails found.")
+            await send_email_to_telegram()
+        else:
+            print("📭 No unread emails found.")
+            await context.bot.send_message(chat_id=update.effective_chat.id, text="📭 No unread emails found.")
+    
+    except Exception as e:
+        print(f"❌ ERROR: {e}")
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"❌ An error occurred: {e}")
+
 if __name__ == "__main__":
+    telegram_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    telegram_app.add_handler(CommandHandler("fetch_emails", fetch_emails))
+    telegram_app.add_handler(CommandHandler("suggest_response", suggest_response))
+    
+    telegram_app.run_polling()
     flask_app.run(host="0.0.0.0", port=8080)
