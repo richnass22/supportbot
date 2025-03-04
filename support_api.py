@@ -153,6 +153,29 @@ async def send_email_to_telegram():
             print("📭 No unread emails found.")  # Debug Log
             send_to_telegram("<b>📭 No new unread emails found.</b>")
 
+            def generate_ai_response(prompt):
+    """Calls OpenAI to generate a response with error handling."""
+    url = "https://api.openai.com/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "gpt-3.5-turbo",
+        "messages": [
+            {"role": "system", "content": "You are a customer support assistant for NextTradeWave.com, a CFD FX broker."},
+            {"role": "user", "content": prompt}
+        ]
+    }
+    response = requests.post(url, headers=headers, json=data)
+
+    if response.status_code == 200:
+        ai_reply = response.json()["choices"][0]["message"]["content"]
+        return html.escape(ai_reply)  # Escape HTML characters for Telegram
+    else:
+        error_msg = response.json().get("error", {}).get("message", "Unknown error")
+        return f"⚠️ AI Response Unavailable: {html.escape(error_msg)}\nPlease check OpenAI API status or billing."
+
 # ✅ **Define `/suggest_response` Command**
 async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Generate AI response based on selected email."""
@@ -173,7 +196,7 @@ async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ai_response = generate_ai_response(full_prompt)
 
-    await update.message.reply_text(f"🤖 *AI Suggested Reply:*\n{ai_response}", parse_mode="MarkdownV2")
+    await update.message.reply_text(f"🤖 <b>AI Suggested Reply:</b>\n{ai_response}", parse_mode="HTML")
 
 async def fetch_emails(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Trigger email fetch via Telegram command."""
