@@ -1,9 +1,8 @@
 import os
 import requests
 import asyncio
-import html
-import threading
 import re
+import html
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup  # For stripping HTML from emails
 from msal import ConfidentialClientApplication
@@ -54,17 +53,12 @@ def get_access_token():
         return None
 
 # 🔹 Fetch Unread Emails (Filters out sent emails)
-def fetch_unread_emails(access_token, hours=None):
+def fetch_unread_emails(access_token):
     """Fetch unread emails from Microsoft Graph API, filtering out sent emails."""
     headers = {"Authorization": f"Bearer {access_token}"}
     
-    # Base query to fetch unread emails
+    # Query to fetch unread emails
     query = "isRead eq false"
-    
-    # Filter by time range if specified
-    if hours:
-        time_filter = (datetime.utcnow() - timedelta(hours=int(hours))).isoformat() + "Z"
-        query += f" and receivedDateTime ge {time_filter}"
 
     # API request with filtering
     response = requests.get(
@@ -87,15 +81,21 @@ def fetch_unread_emails(access_token, hours=None):
         print(f"❌ Error fetching unread emails: {response.json()}")
         return None
 
-# 🔹 Send Message to Telegram (Uses HTML Mode for Stability)
+# 🔹 Escape Special Characters for Telegram MarkdownV2 Mode
+def escape_markdown(text):
+    """Escape special characters for MarkdownV2 in Telegram messages."""
+    special_chars = r"([_*\[\]()~`>#+-=|{}.!])"
+    return re.sub(special_chars, r"\\\1", text)
+
+# 🔹 Send Message to Telegram (Uses MarkdownV2 Mode)
 def send_to_telegram(message):
-    """Send a well-formatted message to Telegram using HTML mode."""
+    """Send a well-formatted message to Telegram using MarkdownV2 mode."""
     telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML",
+        "text": escape_markdown(message),
+        "parse_mode": "MarkdownV2",
         "disable_web_page_preview": True
     }
 
@@ -107,12 +107,13 @@ def send_to_telegram(message):
         print(f"❌ Error sending to Telegram: {response.json()}")
 
 # 🔹 Async Function for Email Processing
-async def send_email_to_telegram(hours=None):
+async def send_email_to_telegram():
     """Fetch unread emails, clean the content, and send them to Telegram."""
+    print("📥 Fetching emails...")
     access_token = get_access_token()
     
     if access_token:
-        emails = fetch_unread_emails(access_token, hours)
+        emails = fetch_unread_emails(access_token)
         
         if emails:
             email_store.clear()  # Reset previous emails
@@ -134,45 +135,19 @@ async def send_email_to_telegram(hours=None):
                     "body": body_text
                 }
 
-                # Limit message size for Telegram
-                body_preview = body_text[:500] + "..." if len(body_text) > 500 else body_text
-
                 # Format message for better readability
                 message = (
-                    f"<b>📩 New Email Received</b> [#{index}]\n"
-                    f"📌 <b>From:</b> {sender_name} ({sender_email})\n"
-                    f"📌 <b>Subject:</b> {subject}\n"
-                    f"🕒 <b>Received:</b> {received_time}\n"
-                    f"📝 <b>Preview:</b> {body_preview}\n\n"
-                    f"✍️ Reply with: <code>/suggest_response {index} Your message</code>"
+                    f"📩 *New Email Received* \\[#{index}\\]\n"
+                    f"📌 *From:* {sender_name} \\({sender_email}\\)\n"
+                    f"📌 *Subject:* {subject}\n"
+                    f"🕒 *Received:* {received_time}\n"
+                    f"📝 *Preview:* {body_text[:500]}...\n\n"
+                    f"✍️ Reply with: `/suggest_response {index} Your message`"
                 )
 
                 send_to_telegram(message)
         else:
-            send_to_telegram("<b>📭 No new unread emails found.</b>")
-
-# ✅ **Define AI Response Function**
-def generate_ai_response(prompt):
-    """Calls OpenAI to generate a response with error handling."""
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "model": "gpt-3.5-turbo",
-        "messages": [
-            {"role": "system", "content": "You are a customer support assistant for NextTradeWave.com, a CFD FX broker."},
-            {"role": "user", "content": prompt}
-        ]
-    }
-    response = requests.post(url, headers=headers, json=data)
-
-    if response.status_code == 200:
-        return response.json()["choices"][0]["message"]["content"]
-    else:
-        error_msg = response.json().get("error", {}).get("message", "Unknown error")
-        return f"⚠️ AI Response Unavailable: {error_msg}\nPlease check OpenAI API status or billing."
+            send_to_telegram("📭 *No new unread emails found.*")
 
 # ✅ **Define `/fetch_emails` Command**
 async def fetch_emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -201,4 +176,16 @@ async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     ai_response = generate_ai_response(full_prompt)
 
-    await update.message.reply_text(f"🤖 <b>AI Suggested Reply:</b>\n{ai_response}", parse_mode="HTML")
+    await update.message.reply_text(f"🤖 *AI Suggested Reply:*\n{ai_response}", parse_mode="MarkdownV2")
+
+# ✅ **Start Telegram Bot Properly**
+def start_telegram_bot():
+    telegram_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    telegram_app.add_handler(CommandHandler("fetch_emails", fetch_emails_command))
+    telegram_app.add_handler(CommandHandler("suggest_response", suggest_response))
+    telegram_app.run_polling()
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    start_telegram_bot()
+    flask_app.run(host="0.0.0.0", port=port)
