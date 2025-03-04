@@ -89,15 +89,13 @@ def escape_markdown(text):
 
 # 🔹 Send Message to Telegram (Uses MarkdownV2 Mode)
 def send_to_telegram(message):
-    """Send a well-formatted message to Telegram using MarkdownV2 mode."""
+    """Send a well-formatted message to Telegram using HTML mode."""
     telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-
-    escaped_message = escape_markdown(message)  # Properly escape special characters
 
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": escaped_message,
-        "parse_mode": "MarkdownV2",
+        "text": html.escape(message),  # Properly escape HTML characters
+        "parse_mode": "HTML",
         "disable_web_page_preview": True
     }
 
@@ -118,7 +116,9 @@ async def send_email_to_telegram():
         emails = fetch_unread_emails(access_token)
         
         if emails:
+            print(f"✅ {len(emails)} unread emails found.")
             email_store.clear()  # Reset previous emails
+            
             for index, email in enumerate(emails[:5], start=1):  # Process top 5 emails
                 subject = email.get("subject", "No Subject")
                 sender_name = email.get("from", {}).get("emailAddress", {}).get("name", "Unknown Sender")
@@ -139,24 +139,19 @@ async def send_email_to_telegram():
 
                 # Format message for better readability
                 message = (
-                    f"📩 *New Email Received* \\[#{index}\\]\n"
-                    f"📌 *From:* {sender_name} \\({sender_email}\\)\n"
-                    f"📌 *Subject:* {subject}\n"
-                    f"🕒 *Received:* {received_time}\n"
-                    f"📝 *Preview:* {body_text[:500]}...\n\n"
-                    f"✍️ Reply with: `/suggest_response {index} Your message`"
+                    f"<b>📩 New Email Received</b> [#{index}]\n"
+                    f"📌 <b>From:</b> {sender_name} ({sender_email})\n"
+                    f"📌 <b>Subject:</b> {subject}\n"
+                    f"🕒 <b>Received:</b> {received_time}\n"
+                    f"📝 <b>Preview:</b> {body_text[:500]}...\n\n"
+                    f"✍️ Reply with: <code>/suggest_response {index} Your message</code>"
                 )
 
+                print(f"📤 Sending email {index} to Telegram: {subject}")  # Debug Log
                 send_to_telegram(message)
         else:
-            send_to_telegram("📭 *No new unread emails found.*")
-
-# ✅ **Define `/fetch_emails` Command**
-async def fetch_emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger email fetch via Telegram command."""
-    print("📥 Received /fetch_emails command.")
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="📬 Fetching latest unread emails...")
-    await send_email_to_telegram()
+            print("📭 No unread emails found.")  # Debug Log
+            send_to_telegram("<b>📭 No new unread emails found.</b>")
 
 # ✅ **Define `/suggest_response` Command**
 async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
