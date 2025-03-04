@@ -75,18 +75,18 @@ def send_to_telegram(message):
     return response.status_code == 200
 
 # 🔹 Async Function for Email Processing
-async def send_email_to_telegram():
-    """Fetch unread emails, clean the content, and send them to Telegram with buttons."""
+async def send_email_to_telegram(context: ContextTypes.DEFAULT_TYPE):
+    """Fetch unread emails, clean the content, and send them to Telegram."""
     print("📥 Fetching emails...")
     access_token = get_access_token()
-    
+
     if access_token:
         emails = fetch_unread_emails(access_token)
-        
+
         if emails:
             print(f"✅ {len(emails)} unread emails found.")
             email_store.clear()  # Reset previous emails
-            
+
             for index, email in enumerate(emails[:5], start=1):  # Process top 5 emails
                 subject = email.get("subject", "No Subject")
                 sender_name = email.get("from", {}).get("emailAddress", {}).get("name", "Unknown Sender")
@@ -112,26 +112,22 @@ async def send_email_to_telegram():
                     f"📌 <b>Subject:</b> {subject}\n"
                     f"🕒 <b>Received:</b> {received_time}\n"
                     f"📝 <b>Preview:</b> {body_text[:500]}...\n\n"
-                    f"✍️ Reply using the button below:"
+                    f"✍️ Reply with: <code>/suggest_response {index} Your message</code>"
                 )
 
-                # Create a button to copy the /suggest_response command
-                button_text = f"✍️ Suggest Reply for Email #{index}"
-                command_text = f"/suggest_response {index} "
-                keyboard = [[InlineKeyboardButton(button_text, switch_inline_query=command_text)]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-
                 print(f"📤 Sending email {index} to Telegram: {subject}")  # Debug Log
+
+                # Use context.bot.send_message properly
                 await context.bot.send_message(
                     chat_id=TELEGRAM_CHAT_ID,
                     text=message,
                     parse_mode="HTML",
-                    reply_markup=reply_markup
+                    disable_web_page_preview=True
                 )
         else:
             print("📭 No unread emails found.")  # Debug Log
             await context.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text="<b>📭 No new unread emails found.</b>", parse_mode="HTML")
-
+            
 # ✅ **Generate AI Response**
 def generate_ai_response(prompt):
     """Calls OpenAI to generate a response with error handling."""
@@ -147,8 +143,9 @@ def generate_ai_response(prompt):
 # ✅ **Fix Telegram Commands**
 async def fetch_emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Trigger email fetch via Telegram command."""
-    await update.message.reply_text("📬 Fetching latest unread emails...")
-    await send_email_to_telegram()
+    print("📥 Received /fetch_emails command.")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="📬 Fetching latest unread emails...")
+    await send_email_to_telegram(context)  # Pass context explicitly
 
 async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Generate AI response based on selected email."""
@@ -194,15 +191,21 @@ async def improve_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🤖 <b>Refined AI Response:</b>\n{new_response}", parse_mode="HTML")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show available bot commands."""
+    """Send a help message listing all available commands."""
     help_text = (
-        "<b>🛠 Available Commands:</b>\n"
-        "📥 /fetch_emails - Fetch latest unread emails\n"
-        "✍️ /suggest_response <email#> <message> - Get AI response for email\n"
-        "🔄 /improve_response <email#> <improvement> - Improve AI response\n"
-        "ℹ️ /help - Show this command list"
+        "<b>🛠 SupportBot Commands:</b>\n\n"
+        "📩 <code>/fetch_emails</code> - Fetch the latest unread emails.\n"
+        "📜 <code>/fetch_recent X</code> - Fetch emails from the last X hours.\n"
+        "✍️ <code>/suggest_response EMAIL_ID Your message</code> - Generate an AI response for a specific email.\n"
+        "🔄 <code>/improve EMAIL_ID Your message</code> - Refine an AI response with additional details.\n"
+        "⏳ <code>/set_auto_fetch 5</code> - Automatically fetch emails every 5 minutes.\n"
+        "📖 <code>/help</code> - Show this help message."
     )
-    await update.message.reply_text(help_text, parse_mode="HTML")
+
+    try:
+        await update.message.reply_text(help_text, parse_mode="HTML")
+    except Exception as e:
+        print(f"❌ Error sending help message: {e}")
 
 if __name__ == "__main__":
     telegram_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
