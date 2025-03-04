@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from msal import ConfidentialClientApplication
 from flask import Flask, jsonify
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from telegram.error import BadRequest
 
@@ -57,7 +57,7 @@ def fetch_unread_emails(access_token, hours=24):
     headers = {"Authorization": f"Bearer {access_token}"}
     since_time = (datetime.utcnow() - timedelta(hours=int(hours))).isoformat() + "Z"
     query = f"isRead eq false and receivedDateTime ge {since_time}"
-    
+
     response = requests.get(
         f"{EMAILS_URL}?$filter={query}&$orderby=receivedDateTime desc",
         headers=headers
