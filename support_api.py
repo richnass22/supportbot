@@ -51,45 +51,48 @@ def get_access_token():
         print(f"❌ Error fetching token: {response.json()}")
         return None
 
-# 🔹 Fetch Unread Emails (Filters out sent emails)
-def fetch_unread_emails(access_token, hours=None):
-    """Fetch unread emails from Microsoft Graph API, filtering out sent emails."""
-    headers = {"Authorization": f"Bearer {access_token}"}
+from bs4 import BeautifulSoup
+
+async def send_email_to_telegram(hours=None):
+    """Fetch unread emails, clean the content, and send them to Telegram."""
+    access_token = get_access_token()
     
-    # Base query to fetch unread emails
-    query = "isRead eq false"
-    
-    # Filter by time range if specified
-    if hours:
-        time_filter = (datetime.utcnow() - timedelta(hours=int(hours))).isoformat() + "Z"
-        query += f" and receivedDateTime ge {time_filter}"
-
-    # API request with filtering
-    response = requests.get(
-        f"{EMAILS_URL}?$filter={query}&$orderby=receivedDateTime desc",
-        headers=headers
-    )
-
-    if response.status_code == 200:
-        emails = response.json().get("value", [])
-
-        # Debugging: Print the number of emails fetched
-        print(f"📩 Debug: {len(emails)} unread emails fetched.")
-
-        # Print first email for debugging
+    if access_token:
+        emails = fetch_unread_emails(access_token, hours)
+        
         if emails:
-            print(f"📝 First email: {emails[0]}")
+            email_store.clear()  # Reset previous emails
+            for index, email in enumerate(emails[:5], start=1):  # Process top 5 emails
+                subject = email.get("subject", "No Subject")
+                sender_name = email.get("from", {}).get("emailAddress", {}).get("name", "Unknown Sender")
+                sender_email = email.get("from", {}).get("emailAddress", {}).get("address", "Unknown Email")
+                received_time = email.get("receivedDateTime", "Unknown Time")
+                body_html = email.get("body", {}).get("content", "No Preview Available")
 
-        # Filter out outgoing emails sent by our company
-        filtered_emails = [
-            email for email in emails
-            if email.get("from", {}).get("emailAddress", {}).get("address") != EMAIL_ADDRESS
-        ]
+                # Convert HTML to plain text to avoid formatting issues
+                soup = BeautifulSoup(body_html, "html.parser")
+                body_text = soup.get_text()
 
-        return filtered_emails
-    else:
-        print(f"❌ Error fetching unread emails: {response.json()}")
-        return None
+                # Store email data in dictionary for future reference
+                email_store[str(index)] = {
+                    "sender": sender_name,
+                    "subject": subject,
+                    "body": body_text
+                }
+
+                # Format message for better readability
+                message = (
+                    f"📩 *New Email Received* \\[#{index}\\]\n"
+                    f"📌 *From:* {sender_name} \\({sender_email}\\)\n"
+                    f"📌 *Subject:* {subject}\n"
+                    f"🕒 *Received:* {received_time}\n"
+                    f"📝 *Preview:* {body_text[:500]}...\n\n"
+                    f"✍️ Reply with: `/suggest_response {index} Your message`"
+                )
+
+                send_to_telegram(message)
+        else:
+            send_to_telegram("📭 *No new unread emails found.*")
 
 # 🔹 Send Message to Telegram (Better Formatting)
 def send_to_telegram(message):
