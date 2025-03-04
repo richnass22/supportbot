@@ -14,7 +14,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 TENANT_ID = os.getenv("TENANT_ID")
-EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")  
+EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -25,7 +25,7 @@ EMAILS_URL = f"https://graph.microsoft.com/v1.0/users/{EMAIL_ADDRESS}/messages"
 
 # 🔹 Email Storage & AI Memory
 email_store = {}
-ai_responses = {}  # Stores past AI-generated responses for improvement
+ai_responses = {}  # Tracks AI responses for interactive improvement
 
 # 🔹 Flask App Setup
 flask_app = Flask(__name__)
@@ -46,9 +46,9 @@ def get_access_token():
     response = requests.post(TOKEN_URL, data=data)
     return response.json().get("access_token") if response.status_code == 200 else None
 
-# 🔹 Fetch Unread Emails (With Time Filter)
+# 🔹 Fetch Unread Emails
 def fetch_unread_emails(access_token, hours=None):
-    """Fetch unread emails from Microsoft Graph API, filtering out sent emails and limiting time range."""
+    """Fetch unread emails, filtering out sent emails & limiting time range."""
     headers = {"Authorization": f"Bearer {access_token}"}
     query = "isRead eq false"
     if hours:
@@ -125,38 +125,34 @@ def generate_ai_response(prompt):
     response = requests.post(url, headers=headers, json=data)
     return html.escape(response.json()["choices"][0]["message"]["content"]) if response.status_code == 200 else "⚠️ AI Response Unavailable."
 
-# ✅ **Fix `/fetch_emails` Command (Pass `update` & `context`)**
+# ✅ **Fix Telegram Commands**
 async def fetch_emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Trigger email fetch via Telegram command."""
     await update.message.reply_text("📬 Fetching latest unread emails...")
     await send_email_to_telegram()
 
-# ✅ **Help Command**
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List all available bot commands."""
-    help_text = (
-        "<b>📜 Available Commands:</b>\n"
-        "/fetch_emails - Fetch latest unread emails\n"
-        "/fetch_recent X - Fetch all emails in the last X hours\n"
-        "/suggest_response <email_number> <your message> - Generate AI response\n"
-        "/refine_response <response_number> <your improvement> - Improve AI response\n"
-        "/help - Show this help menu"
-    )
-    await update.message.reply_text(help_text, parse_mode="HTML")
+async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate AI response based on selected email."""
+    args = context.args
+    if not args or len(args) < 2:
+        await update.message.reply_text("⚠️ Specify an email number & message.\nExample: `/suggest_response 2 Apologize for the delay`")
+        return
 
-# ✅ **Auto-Fetch Emails Every 5 Minutes**
-async def auto_fetch_emails():
-    while True:
-        await send_email_to_telegram()
-        await asyncio.sleep(300)
+    email_index = args[0]  
+    user_message = " ".join(args[1:])
+    email_data = email_store.get(email_index)
+    if not email_data:
+        await update.message.reply_text("⚠️ Invalid email number. Use `/fetch_emails` first.")
+        return
+
+    full_prompt = f"Company: NextTradeWave.com\n\nEmail Subject: {email_data['subject']}\n\nEmail Body: {email_data['body']}\n\nUser Instruction: {user_message}"
+    ai_response = generate_ai_response(full_prompt)
+    await update.message.reply_text(f"🤖 <b>AI Suggested Reply:</b>\n{ai_response}", parse_mode="HTML")
 
 if __name__ == "__main__":
     telegram_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     telegram_app.add_handler(CommandHandler("fetch_emails", fetch_emails_command))
-    telegram_app.add_handler(CommandHandler("help", help_command))
-
-    loop = asyncio.get_event_loop()
-    loop.create_task(auto_fetch_emails())  # Run auto-fetch in background
+    telegram_app.add_handler(CommandHandler("suggest_response", suggest_response))
 
     telegram_app.run_polling()
     flask_app.run(host="0.0.0.0", port=8080)
