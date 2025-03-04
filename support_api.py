@@ -129,55 +129,30 @@ def process_emails():
     asyncio.run(send_email_to_telegram())  # ✅ Fixed: Ensures an event loop is running
     return jsonify({"message": "Fetching emails... Check your Telegram!"})
 
-# 🔹 Generate AI Response
-def generate_ai_response(prompt):
-    """Calls OpenAI to generate a response."""
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "model": "gpt-3.5-turbo",
-        "messages": [{"role": "system", "content": "You are a professional customer support assistant."},
-                     {"role": "user", "content": prompt}]
-    }
-    response = requests.post(url, headers=headers, json=data)
-    
-    if response.status_code == 200:
-        return response.json()["choices"][0]["message"]["content"]
-    else:
-        return f"⚠️ Error generating AI response: {response.text}"
-
 # === 🤖 TELEGRAM BOT COMMANDS === #
 async def fetch_emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Trigger email fetch via Telegram command."""
     await context.bot.send_message(chat_id=update.effective_chat.id, text="📬 Fetching emails...")
     await send_email_to_telegram()
 
-async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Generate AI response based on selected email."""
-    args = context.args
-    if not args or len(args) < 2:
-        await update.message.reply_text("⚠️ Please specify an email number and message.\nExample: `/suggest_response 2 Please be polite`")
-        return
+# ✅ **Fixed Telegram Polling - Runs in Main Thread**
+def start_telegram_bot():
+    """Runs the Telegram bot properly in the main thread"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
-    email_index = args[0]  # First argument should be the email number
-    user_message = " ".join(args[1:])  # The rest is the message
+    telegram_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    telegram_app.add_handler(CommandHandler("fetch_emails", fetch_emails_command))
 
-    if email_index not in email_store:
-        await update.message.reply_text("⚠️ Invalid email number. Use `/fetch_emails` to get valid email IDs.")
-        return
+    print("✅ Telegram bot initialized successfully!")
+    telegram_app.run_polling()
 
-    email_data = email_store[email_index]
-    full_prompt = f"Email Subject: {email_data['subject']}\n\nEmail Body: {email_data['body']}\n\nUser Instruction: {user_message}"
-
-    ai_response = generate_ai_response(full_prompt)
-    await update.message.reply_text(f"🤖 AI Suggested Reply:\n{ai_response}")
-
-# Run Flask Server & Telegram Bot Together
+# 🔹 Run Flask Server & Telegram Bot Together
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    telegram_thread = threading.Thread(target=lambda: ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build().run_polling(), daemon=True)
-    telegram_thread.start()
+
+    # Start Telegram bot properly without threading issues
+    start_telegram_bot()
+
+    # Start Flask server
     flask_app.run(host="0.0.0.0", port=port)
