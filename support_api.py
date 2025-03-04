@@ -180,11 +180,22 @@ async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"🤖 *AI Suggested Reply:*\n{ai_response}", parse_mode="MarkdownV2")
 
+async def fetch_emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Trigger email fetch via Telegram command."""
+    print("📥 Received /fetch_emails command.")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="📬 Fetching latest unread emails...")
+    await send_email_to_telegram()
+
 # ✅ **Start Telegram Bot Properly**
 def start_telegram_bot():
+    """Initialize and run the Telegram bot properly."""
     telegram_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    
+    # Register handlers
     telegram_app.add_handler(CommandHandler("fetch_emails", fetch_emails_command))
     telegram_app.add_handler(CommandHandler("suggest_response", suggest_response))
+    
+    print("✅ Telegram bot is running and listening for commands.")
     telegram_app.run_polling()
 
 if __name__ == "__main__":
