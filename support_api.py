@@ -71,8 +71,14 @@ def fetch_unread_emails(access_token, hours=None):
     )
 
     if response.status_code == 200:
-        print("📩 Unread emails fetched successfully.")
         emails = response.json().get("value", [])
+
+        # Debugging: Print the number of emails fetched
+        print(f"📩 Debug: {len(emails)} unread emails fetched.")
+
+        # Print first email for debugging
+        if emails:
+            print(f"📝 First email: {emails[0]}")
 
         # Filter out outgoing emails sent by our company
         filtered_emails = [
