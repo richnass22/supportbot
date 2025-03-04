@@ -81,13 +81,7 @@ def fetch_unread_emails(access_token):
         print(f"❌ Error fetching unread emails: {response.json()}")
         return None
 
-# 🔹 Escape Special Characters for Telegram MarkdownV2 Mode
-def escape_markdown(text):
-    """Escape special characters for MarkdownV2 in Telegram messages."""
-    special_chars = r"([_*\[\]()~`>#+-=|{}.!])"
-    return re.sub(special_chars, r"\\\1", text)
-
-# 🔹 Send Message to Telegram (Uses MarkdownV2 Mode)
+# 🔹 Send Message to Telegram (Uses HTML Mode)
 def send_to_telegram(message):
     """Send a well-formatted message to Telegram using HTML mode."""
     telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -153,7 +147,8 @@ async def send_email_to_telegram():
             print("📭 No unread emails found.")  # Debug Log
             send_to_telegram("<b>📭 No new unread emails found.</b>")
 
-            def generate_ai_response(prompt):
+# ✅ **Generate AI Response**
+def generate_ai_response(prompt):
     """Calls OpenAI to generate a response with error handling."""
     url = "https://api.openai.com/v1/chat/completions"
     headers = {
@@ -198,20 +193,5 @@ async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"🤖 <b>AI Suggested Reply:</b>\n{ai_response}", parse_mode="HTML")
 
-async def fetch_emails(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger email fetch via Telegram command."""
-    print("📥 Received /fetch_emails command.")
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="📬 Fetching latest unread emails...")
-    await send_email_to_telegram()
-
-# ✅ **Start Telegram Bot Properly**
-def start_telegram_bot():
-    telegram_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-    telegram_app.add_handler(CommandHandler("fetch_emails", fetch_emails))
-    telegram_app.add_handler(CommandHandler("suggest_response", suggest_response))
-    telegram_app.run_polling()
-
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    start_telegram_bot()
-    flask_app.run(host="0.0.0.0", port=port)
+    flask_app.run(host="0.0.0.0", port=8080)
