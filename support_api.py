@@ -21,8 +21,9 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 TOKEN_URL = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
 EMAILS_URL = f"https://graph.microsoft.com/v1.0/users/{EMAIL_ADDRESS}/messages"
 
-# 🔹 Temporary Storage for Emails
+# 🔹 Temporary Storage for Emails & User Edits
 email_store = {}
+user_chat_sessions = {}  # Stores ongoing AI chats for improvement
 
 # 🔹 Flask App Setup
 flask_app = Flask(__name__)
@@ -129,9 +130,9 @@ def process_emails():
     asyncio.run(send_email_to_telegram())  # ✅ Fixed: Ensures an event loop is running
     return jsonify({"message": "Fetching emails... Check your Telegram!"})
 
-# 🔹 Generate AI Response (With Error Handling)
+# 🔹 Generate AI Response (With Context Awareness)
 def generate_ai_response(prompt):
-    """Calls OpenAI to generate a response with error handling."""
+    """Calls OpenAI to generate a response with NextTradeWave awareness."""
     url = "https://api.openai.com/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {OPENAI_API_KEY}",
@@ -139,49 +140,44 @@ def generate_ai_response(prompt):
     }
     data = {
         "model": "gpt-3.5-turbo",
-        "messages": [{"role": "system", "content": "You are a professional customer support assistant."},
-                     {"role": "user", "content": prompt}]
+        "messages": [
+            {"role": "system", "content": "You are a customer support bot for NextTradeWave.com, a CFD FX broker. Your responses should reflect this and avoid assuming another company’s identity."},
+            {"role": "user", "content": prompt}
+        ]
     }
     response = requests.post(url, headers=headers, json=data)
 
     if response.status_code == 200:
         return response.json()["choices"][0]["message"]["content"]
     else:
-        error_message = response.json().get("error", {}).get("message", "Unknown error occurred.")
-        return f"⚠️ AI Response Unavailable: {error_message}\nPlease check OpenAI API status or billing."
+        return f"⚠️ AI Response Unavailable: {response.json().get('error', {}).get('message', 'Unknown error occurred.')}\nPlease check OpenAI API status or billing."
 
 # === 🤖 TELEGRAM BOT COMMANDS === #
-async def fetch_emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Trigger email fetch via Telegram command."""
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="📬 Fetching emails...")
-    await send_email_to_telegram()
-
 async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Generate AI response based on selected email."""
     args = context.args
     if not args or len(args) < 2:
-        await update.message.reply_text("⚠️ Please specify an email number and message.\nExample: `/suggest_response 2 Please be polite`")
+        await update.message.reply_text("⚠️ Specify an email number & message.\nExample: `/suggest_response 2 Apologize for the delay`")
         return
 
     email_index = args[0]  # First argument should be the email number
     user_message = " ".join(args[1:])  # The rest is the message
 
     if email_index not in email_store:
-        await update.message.reply_text("⚠️ Invalid email number. Use `/fetch_emails` to get valid email IDs.")
+        await update.message.reply_text("⚠️ Invalid email number. Use `/fetch_emails` first.")
         return
 
     email_data = email_store[email_index]
-    full_prompt = f"Email Subject: {email_data['subject']}\n\nEmail Body: {email_data['body']}\n\nUser Instruction: {user_message}"
+    full_prompt = f"Company: NextTradeWave.com (CFD FX Broker)\n\nEmail Subject: {email_data['subject']}\n\nEmail Body: {email_data['body']}\n\nUser Instruction: {user_message}"
 
     ai_response = generate_ai_response(full_prompt)
 
-    await update.message.reply_text(f"🤖 *AI Suggested Reply:*\n{ai_response}", parse_mode="Markdown")
+    await update.message.reply_text(f"🤖 AI Suggested Reply:\n{ai_response}", parse_mode="Markdown")
 
 # ✅ **Start Telegram Bot Properly**
 def start_telegram_bot():
     """Runs the Telegram bot properly in the main thread"""
     telegram_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-    telegram_app.add_handler(CommandHandler("fetch_emails", fetch_emails_command))
     telegram_app.add_handler(CommandHandler("suggest_response", suggest_response))
 
     print("✅ Telegram bot initialized successfully!")
