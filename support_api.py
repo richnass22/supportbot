@@ -86,14 +86,22 @@ def fetch_unread_emails(access_token, hours=None):
         print(f"❌ Error fetching unread emails: {response.json()}")
         return None
 
-# 🔹 Send Message to Telegram (Better Formatting)
+# 🔹 import re
+
+def escape_markdown(text):
+    """Escape special characters for MarkdownV2 in Telegram messages."""
+    special_chars = r"([_*\[\]()~`>#+-=|{}.!])"
+    return re.sub(special_chars, r"\\\1", text)
+
 def send_to_telegram(message):
-    """Send a well-formatted message to Telegram."""
+    """Send a well-formatted message to Telegram with escaped MarkdownV2 characters."""
     telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+
+    escaped_message = escape_markdown(message)  # Escape special characters
 
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
+        "text": escaped_message,
         "parse_mode": "MarkdownV2",
         "disable_web_page_preview": True
     }
