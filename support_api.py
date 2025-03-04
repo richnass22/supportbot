@@ -3,6 +3,7 @@ import requests
 import asyncio
 import html
 import threading
+from datetime import datetime, timedelta
 from msal import ConfidentialClientApplication
 from flask import Flask, jsonify
 from telegram import Update
@@ -12,7 +13,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 TENANT_ID = os.getenv("TENANT_ID")
-EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
+EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")  # Your company's email
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -21,9 +22,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 TOKEN_URL = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
 EMAILS_URL = f"https://graph.microsoft.com/v1.0/users/{EMAIL_ADDRESS}/messages"
 
-# 🔹 Temporary Storage for Emails & User Edits
+# 🔹 Temporary Storage for Emails
 email_store = {}
-user_chat_sessions = {}  # Stores ongoing AI chats for improvement
 
 # 🔹 Flask App Setup
 flask_app = Flask(__name__)
@@ -51,32 +51,50 @@ def get_access_token():
         print(f"❌ Error fetching token: {response.json()}")
         return None
 
-# 🔹 Fetch Emails
-def fetch_emails(access_token):
-    """Fetch emails from Microsoft Graph API"""
+# 🔹 Fetch Unread Emails (Filters out sent emails)
+def fetch_unread_emails(access_token, hours=None):
+    """Fetch unread emails from Microsoft Graph API, filtering out sent emails."""
     headers = {"Authorization": f"Bearer {access_token}"}
     
-    response = requests.get(EMAILS_URL, headers=headers)
+    # Base query to fetch unread emails
+    query = "isRead eq false"
+    
+    # Filter by time range if specified
+    if hours:
+        time_filter = (datetime.utcnow() - timedelta(hours=int(hours))).isoformat() + "Z"
+        query += f" and receivedDateTime ge {time_filter}"
+
+    # API request with filtering
+    response = requests.get(
+        f"{EMAILS_URL}?$filter={query}&$orderby=receivedDateTime desc",
+        headers=headers
+    )
 
     if response.status_code == 200:
-        print("📩 Emails fetched successfully.")
-        return response.json().get("value", [])
+        print("📩 Unread emails fetched successfully.")
+        emails = response.json().get("value", [])
+
+        # Filter out outgoing emails sent by our company
+        filtered_emails = [
+            email for email in emails
+            if email.get("from", {}).get("emailAddress", {}).get("address") != EMAIL_ADDRESS
+        ]
+
+        return filtered_emails
     else:
-        print(f"❌ Error fetching emails: {response.json()}")
+        print(f"❌ Error fetching unread emails: {response.json()}")
         return None
 
-# 🔹 Send Message to Telegram
+# 🔹 Send Message to Telegram (Better Formatting)
 def send_to_telegram(message):
-    """Send a message to Telegram with escaped HTML characters"""
+    """Send a well-formatted message to Telegram."""
     telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    
-    # Escape special characters for Telegram
-    escaped_message = html.escape(message)
 
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": escaped_message,
-        "parse_mode": "HTML"
+        "text": message,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
     }
 
     response = requests.post(telegram_url, json=payload)
@@ -87,12 +105,12 @@ def send_to_telegram(message):
         print(f"❌ Error sending to Telegram: {response.json()}")
 
 # 🔹 Async Function for Email Processing
-async def send_email_to_telegram():
-    """Fetch emails and send them to Telegram"""
+async def send_email_to_telegram(hours=None):
+    """Fetch unread emails and send them to Telegram."""
     access_token = get_access_token()
     
     if access_token:
-        emails = fetch_emails(access_token)
+        emails = fetch_unread_emails(access_token, hours)
         
         if emails:
             email_store.clear()  # Reset previous emails
@@ -101,84 +119,56 @@ async def send_email_to_telegram():
                 sender_name = email.get("from", {}).get("emailAddress", {}).get("name", "Unknown Sender")
                 sender_email = email.get("from", {}).get("emailAddress", {}).get("address", "Unknown Email")
                 body_preview = email.get("bodyPreview", "No Preview Available")
+                received_time = email.get("receivedDateTime", "Unknown Time")
 
                 # Store email data in dictionary for future reference
-                email_store[str(index)] = {"sender": sender_name, "subject": subject, "body": body_preview}
+                email_store[str(index)] = {
+                    "sender": sender_name,
+                    "subject": subject,
+                    "body": body_preview
+                }
 
-                # Escape special characters for Telegram
-                subject = html.escape(subject)
-                sender_name = html.escape(sender_name)
-                sender_email = html.escape(sender_email)
-                body_preview = html.escape(body_preview)
-
+                # Format message for better readability
                 message = (
                     f"📩 <b>New Email Received</b> [#{index}]\n"
                     f"📌 <b>From:</b> {sender_name} ({sender_email})\n"
                     f"📌 <b>Subject:</b> {subject}\n"
-                    f"📌 <b>Preview:</b> {body_preview}\n"
+                    f"🕒 <b>Received:</b> {received_time}\n"
+                    f"📝 <b>Preview:</b> {body_preview[:500]}...\n\n"
                     f"✍️ Reply with: <code>/suggest_response {index} Your message</code>"
                 )
 
                 send_to_telegram(message)
         else:
-            print("⚠️ No new emails found.")
+            send_to_telegram("📭 No new unread emails found.")
 
 # 🔹 Flask Route to Trigger Email Fetching
 @flask_app.route("/process-emails", methods=["GET"])
 def process_emails():
-    """Trigger the email fetch function."""
-    asyncio.run(send_email_to_telegram())  # ✅ Fixed: Ensures an event loop is running
-    return jsonify({"message": "Fetching emails... Check your Telegram!"})
-
-# 🔹 Generate AI Response (With Context Awareness)
-def generate_ai_response(prompt):
-    """Calls OpenAI to generate a response with NextTradeWave awareness."""
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "model": "gpt-3.5-turbo",
-        "messages": [
-            {"role": "system", "content": "You are a customer support bot for NextTradeWave.com, a CFD FX broker. Your responses should reflect this and avoid assuming another company’s identity."},
-            {"role": "user", "content": prompt}
-        ]
-    }
-    response = requests.post(url, headers=headers, json=data)
-
-    if response.status_code == 200:
-        return response.json()["choices"][0]["message"]["content"]
-    else:
-        return f"⚠️ AI Response Unavailable: {response.json().get('error', {}).get('message', 'Unknown error occurred.')}\nPlease check OpenAI API status or billing."
+    """Trigger the email fetch function for last 24 hours."""
+    asyncio.run(send_email_to_telegram(24))  
+    return jsonify({"message": "Fetching last 24 hours of emails... Check Telegram!"})
 
 # === 🤖 TELEGRAM BOT COMMANDS === #
-async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Generate AI response based on selected email."""
+async def fetch_emails_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Trigger email fetch via Telegram command."""
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="📬 Fetching latest unread emails...")
+    await send_email_to_telegram()
+
+async def fetch_recent_emails(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fetch unread emails from the last X hours."""
     args = context.args
-    if not args or len(args) < 2:
-        await update.message.reply_text("⚠️ Specify an email number & message.\nExample: `/suggest_response 2 Apologize for the delay`")
-        return
+    hours = args[0] if args else "24"  # Default to last 24 hours if no argument given
 
-    email_index = args[0]  # First argument should be the email number
-    user_message = " ".join(args[1:])  # The rest is the message
-
-    if email_index not in email_store:
-        await update.message.reply_text("⚠️ Invalid email number. Use `/fetch_emails` first.")
-        return
-
-    email_data = email_store[email_index]
-    full_prompt = f"Company: NextTradeWave.com (CFD FX Broker)\n\nEmail Subject: {email_data['subject']}\n\nEmail Body: {email_data['body']}\n\nUser Instruction: {user_message}"
-
-    ai_response = generate_ai_response(full_prompt)
-
-    await update.message.reply_text(f"🤖 AI Suggested Reply:\n{ai_response}", parse_mode="Markdown")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=f"📬 Fetching unread emails from the last {hours} hours...")
+    await send_email_to_telegram(hours)
 
 # ✅ **Start Telegram Bot Properly**
 def start_telegram_bot():
     """Runs the Telegram bot properly in the main thread"""
     telegram_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-    telegram_app.add_handler(CommandHandler("suggest_response", suggest_response))
+    telegram_app.add_handler(CommandHandler("fetch_emails", fetch_emails_command))
+    telegram_app.add_handler(CommandHandler("fetch_recent", fetch_recent_emails))
 
     print("✅ Telegram bot initialized successfully!")
     telegram_app.run_polling()
