@@ -92,9 +92,11 @@ def send_to_telegram(message):
     """Send a well-formatted message to Telegram using MarkdownV2 mode."""
     telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
+    escaped_message = escape_markdown(message)  # Properly escape special characters
+
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": escape_markdown(message),
+        "text": escaped_message,
         "parse_mode": "MarkdownV2",
         "disable_web_page_preview": True
     }
