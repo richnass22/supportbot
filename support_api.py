@@ -25,7 +25,7 @@ EMAILS_URL = f"https://graph.microsoft.com/v1.0/users/{EMAIL_ADDRESS}/messages"
 
 # 🔹 Email Storage & AI Memory
 email_store = {}
-ai_responses = {}  # Tracks AI responses for interactive improvement
+ai_responses = {}  # Stores AI suggestions for refining responses
 
 # 🔹 Flask App Setup
 flask_app = Flask(__name__)
@@ -47,14 +47,10 @@ def get_access_token():
     return response.json().get("access_token") if response.status_code == 200 else None
 
 # 🔹 Fetch Unread Emails
-def fetch_unread_emails(access_token, hours=None):
-    """Fetch unread emails, filtering out sent emails & limiting time range."""
+def fetch_unread_emails(access_token):
+    """Fetch unread emails, filtering out sent emails."""
     headers = {"Authorization": f"Bearer {access_token}"}
     query = "isRead eq false"
-    if hours:
-        time_filter = (datetime.utcnow() - timedelta(hours=int(hours))).isoformat() + "Z"
-        query += f" and receivedDateTime ge {time_filter}"
-
     response = requests.get(
         f"{EMAILS_URL}?$filter={query}&$orderby=receivedDateTime desc",
         headers=headers
@@ -78,14 +74,14 @@ def send_to_telegram(message):
     return response.status_code == 200
 
 # 🔹 Async Function for Email Processing
-async def send_email_to_telegram(hours=None):
+async def send_email_to_telegram():
     """Fetch unread emails and send them to Telegram."""
     access_token = get_access_token()
     if not access_token:
         send_to_telegram("❌ Could not retrieve access token.")
         return
 
-    emails = fetch_unread_emails(access_token, hours)
+    emails = fetch_unread_emails(access_token)
     if not emails:
         send_to_telegram("📭 No new unread emails found.")
         return
@@ -147,12 +143,50 @@ async def suggest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     full_prompt = f"Company: NextTradeWave.com\n\nEmail Subject: {email_data['subject']}\n\nEmail Body: {email_data['body']}\n\nUser Instruction: {user_message}"
     ai_response = generate_ai_response(full_prompt)
-    await update.message.reply_text(f"🤖 <b>AI Suggested Reply:</b>\n{ai_response}", parse_mode="HTML")
+
+    # Store response to allow refinement
+    ai_responses[email_index] = ai_response
+
+    await update.message.reply_text(f"🤖 <b>AI Suggested Reply:</b>\n{ai_response}\n\n🔄 Reply with: `/improve_response {email_index} Your adjustment`", parse_mode="HTML")
+
+async def improve_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Allow refining AI responses interactively."""
+    args = context.args
+    if not args or len(args) < 2:
+        await update.message.reply_text("⚠️ Specify an email number & improvement.\nExample: `/improve_response 2 Make it more formal`")
+        return
+
+    email_index = args[0]  
+    improvement = " ".join(args[1:])
+
+    if email_index not in ai_responses:
+        await update.message.reply_text("⚠️ No AI response found for this email. Use `/suggest_response` first.")
+        return
+
+    full_prompt = f"Previous AI response: {ai_responses[email_index]}\n\nUser Improvement: {improvement}\n\nGenerate a refined version."
+    new_response = generate_ai_response(full_prompt)
+
+    ai_responses[email_index] = new_response
+
+    await update.message.reply_text(f"🤖 <b>Refined AI Response:</b>\n{new_response}", parse_mode="HTML")
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show available bot commands."""
+    help_text = (
+        "<b>🛠 Available Commands:</b>\n"
+        "📥 /fetch_emails - Fetch latest unread emails\n"
+        "✍️ /suggest_response <email#> <message> - Get AI response for email\n"
+        "🔄 /improve_response <email#> <improvement> - Improve AI response\n"
+        "ℹ️ /help - Show this command list"
+    )
+    await update.message.reply_text(help_text, parse_mode="HTML")
 
 if __name__ == "__main__":
     telegram_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     telegram_app.add_handler(CommandHandler("fetch_emails", fetch_emails_command))
     telegram_app.add_handler(CommandHandler("suggest_response", suggest_response))
+    telegram_app.add_handler(CommandHandler("improve_response", improve_response))
+    telegram_app.add_handler(CommandHandler("help", help_command))
 
     telegram_app.run_polling()
     flask_app.run(host="0.0.0.0", port=8080)
